@@ -14,6 +14,8 @@ from scvi._types import LatentDataType
 from scvi.distributions import NegativeBinomial, Poisson, ZeroInflatedNegativeBinomial
 from scvi.module.base import BaseLatentModeModuleClass, LossOutput, auto_move_data
 from scvi.nn import DecoderSCVI, Encoder, LinearDecoderSCVI, one_hot
+from scvi.priors.gaussianprior import GaussianPrior
+from scvi.priors.vampprior import VampPrior
 
 torch.backends.cudnn.benchmark = True
 
@@ -105,6 +107,8 @@ class VAE(BaseLatentModeModuleClass):
         log_variational: bool = True,
         gene_likelihood: Literal["zinb", "nb", "poisson"] = "zinb",
         latent_distribution: str = "normal",
+        prior_distribution: Literal["normal", "vamp"] = "normal",
+        prior_kwargs: Optional[dict] = None,
         encode_covariates: bool = False,
         deeply_inject_covariates: bool = True,
         use_batch_norm: Literal["encoder", "decoder", "none", "both"] = "both",
@@ -210,6 +214,15 @@ class VAE(BaseLatentModeModuleClass):
             use_layer_norm=use_layer_norm_decoder,
             scale_activation="softplus" if use_size_factor_key else "softmax",
         )
+
+        prior_kwargs = {} if prior_kwargs is None else prior_kwargs
+        if prior_distribution == "normal":
+            self.prior = GaussianPrior(n_latent=n_latent, **prior_kwargs)
+        elif prior_distribution == "vamp":
+            self.prior = VampPrior(n_latent=n_latent, n_input=n_input,
+                                   encoder=self.z_encoder, **prior_kwargs)
+        else:
+            raise NotImplementedError(f"{prior_distribution=} is not implemented.")
 
     def _get_inference_input(
         self,
@@ -416,7 +429,7 @@ class VAE(BaseLatentModeModuleClass):
                 local_library_log_vars,
             ) = self._compute_local_library_params(batch_index)
             pl = Normal(local_library_log_means, local_library_log_vars.sqrt())
-        pz = Normal(torch.zeros_like(z), torch.ones_like(z))
+        pz = self.prior
         return dict(
             px=px,
             pl=pl,
@@ -432,9 +445,15 @@ class VAE(BaseLatentModeModuleClass):
     ):
         """Computes the loss function for the model."""
         x = tensors[REGISTRY_KEYS.X_KEY]
-        kl_divergence_z = kl(inference_outputs["qz"], generative_outputs["pz"]).sum(
-            dim=1
-        )
+        # kl_divergence_z = kl(inference_outputs["qz"], generative_outputs["pz"]).sum(
+        #    dim=1
+        # )
+
+        log_q_zx = inference_outputs["qz"].log_prob(inference_outputs["z"])
+        log_p_z = generative_outputs["pz"].log_prob(inference_outputs["z"])
+
+        kl_divergence_z = (log_q_zx.sum(-1) - log_p_z)
+
         if not self.use_observed_lib_size:
             kl_divergence_l = kl(
                 inference_outputs["ql"],

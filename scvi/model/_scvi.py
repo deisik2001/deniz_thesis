@@ -107,6 +107,8 @@ class SCVI(
         dispersion: Literal["gene", "gene-batch", "gene-label", "gene-cell"] = "gene",
         gene_likelihood: Literal["zinb", "nb", "poisson"] = "zinb",
         latent_distribution: Literal["normal", "ln"] = "normal",
+        prior_distribution: Literal["normal", "vamp"] = "normal",
+        prior_kwargs: Optional[dict] = None,
         **model_kwargs,
     ):
         super().__init__(adata)
@@ -146,6 +148,8 @@ class SCVI(
             dispersion=dispersion,
             gene_likelihood=gene_likelihood,
             latent_distribution=latent_distribution,
+            prior_distribution=prior_distribution,
+            prior_kwargs=prior_kwargs,
             use_size_factor_key=use_size_factor_key,
             library_log_means=library_log_means,
             library_log_vars=library_log_vars,
